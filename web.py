@@ -11,6 +11,12 @@ face_scanner = FaceScanner(RESIZE_RATIO,
                            SCANNER_KERNEL_FILE_PATH,
                            DETECTOR_KERNEL_FILE_PATH)
 
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
+
+
+def is_extension_correct(filename: str) -> bool:
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 
 @app.route('/', methods=['GET'])
 def index():
@@ -24,8 +30,12 @@ def fake_photo_detection():
     elif 'photo' not in request.files:
         return jsonify({"Message": "Profile photo is missing in the request body"}), 400
     else:
-        is_valid, response, img = face_scanner.validate_image(np.frombuffer(request.files['photo'].read(), np.uint8))
-        return jsonify({"Message": response, "IsValid": is_valid, "Image": img.decode('utf-8')}), 200
+        file = request.files['photo']
+        if is_extension_correct(file.filename):
+            is_valid, response, img = face_scanner.validate_image(np.frombuffer(file.read(), np.uint8))
+            return jsonify({"Message": response, "IsValid": is_valid, "Image": img.decode('utf-8')}), 200
+        else:
+            return jsonify({"Message": "Allowed file extensions are *.png, *.jpg, *.jpeg"}), 400
 
 
 if __name__ == '__main__':

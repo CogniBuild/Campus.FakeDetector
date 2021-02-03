@@ -1,7 +1,7 @@
 import cv2
-import numpy as np
 import tensorflow as tf
 
+from kernel.filters import *
 from kernel.messages import *
 
 
@@ -56,9 +56,10 @@ class FaceScanner(object):
                  use_crop=False, crop_offset=0,
                  scale_factor=1.1, min_neighbors=5,
                  min_size=(10, 10), border_thickness=3):
+        self.resize_ratio = resize_ratio
         self.scanner = cv2.CascadeClassifier(scanner_kernel_path)
         self.scale_factor, self.min_neighbors, self.min_size = scale_factor, min_neighbors, min_size
-        self.border_thickness = border_thickness
+        self.border_thickness, self.use_crop, self.crop_offset = border_thickness, use_crop, crop_offset
 
         self.detector = DeepFakeDetectorGray(resize_ratio)
         self.detector.load_kernel(detector_kernel_path)
@@ -76,6 +77,23 @@ class FaceScanner(object):
             cv2.rectangle(cv_image, (0, 0), (width, height), self.INCORRECT_COLOR, self.border_thickness)
 
             return NO_FACES_DETECTED, cv_image
+        elif len(faces) == 1:
+            x, y, width, height = faces[0]
+
+            cv_image_cropped = cv_image[x - self.crop_offset:x + width + self.crop_offset,
+                                        y - self.crop_offset:y + height + self.crop_offset]
+
+            if self.use_crop:
+                cv_image_resized = cv2.resize(cv_image_cropped, self.resize_ratio)
+            else:
+                cv_image_resized = cv2.resize(cv_image, self.resize_ratio)
+
+            if self.detector.is_image_real(rgb2gray(cv_image_resized)):
+                return VALID_IMAGE, cv_image_cropped if self.use_crop else cv_image
+            else:
+                cv2.rectangle(cv_image, (x, y), (x + width, y + height), self.INCORRECT_COLOR, self.border_thickness)
+                return FAKE_DETECTED, cv_image
+
         else:
             for (x, y, width, height) in faces:
                 cv2.rectangle(cv_image, (x, y), (x + width, y + height), self.INCORRECT_COLOR, self.border_thickness)

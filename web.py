@@ -1,9 +1,15 @@
+import numpy as np
+
 from flask import Flask, request, make_response
 from settings import *
+from kernel.detectors import FaceScanner
 
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = APPLICATION_SECRET
+face_scanner = FaceScanner(RESIZE_RATIO,
+                           SCANNER_KERNEL_FILE_PATH,
+                           DETECTOR_KERNEL_FILE_PATH)
 
 
 @app.route('/', methods=['GET'])
@@ -18,8 +24,8 @@ def fake_photo_detection():
     elif 'photo' not in request.files:
         return make_response("Profile photo is missing in the request body"), 400
     else:
-        # TODO: Add fake detection functionality below
-        return make_response("Request is valid"), 200
+        response, _ = face_scanner.validate_image(np.frombuffer(request.files['photo'].read(), np.uint8))
+        return response, 200
 
 
 if __name__ == '__main__':

@@ -1,4 +1,3 @@
-import base64
 import numpy as np
 
 from flask import Flask, request, jsonify
@@ -26,7 +25,7 @@ def fake_photo_detection():
         return jsonify({"Message": "Profile photo is missing in the request body"}), 400
     else:
         is_valid, response, img = face_scanner.validate_image(np.frombuffer(request.files['photo'].read(), np.uint8))
-        return jsonify({"Message": response, "IsValid": is_valid, "Image": base64.b64encode(img).decode("utf-8")}), 200
+        return jsonify({"Message": response, "IsValid": is_valid, "Image": img.decode('utf-8')}), 200
 
 
 if __name__ == '__main__':

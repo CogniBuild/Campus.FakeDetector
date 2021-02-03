@@ -1,8 +1,14 @@
 import cv2
+import base64
 import tensorflow as tf
 
 from kernel.filters import *
 from kernel.messages import *
+
+
+def to_base64(image: np.array) -> bytes:
+    _, buffer_img = cv2.imencode('.png', image)
+    return base64.b64encode(buffer_img)
 
 
 class DeepFakeDetectorGray(object):
@@ -76,7 +82,7 @@ class FaceScanner(object):
             height, width, _ = cv_image.shape
             cv2.rectangle(cv_image, (0, 0), (width, height), self.INCORRECT_COLOR, self.border_thickness)
 
-            return False, NO_FACES_DETECTED, cv_image
+            return False, NO_FACES_DETECTED, to_base64(cv_image)
         elif len(faces) == 1:
             x, y, width, height = faces[0]
 
@@ -89,13 +95,13 @@ class FaceScanner(object):
                 cv_image_resized = cv2.resize(cv_image, self.resize_ratio)
 
             if self.detector.is_image_real(rgb2gray(cv_image_resized)):
-                return True, VALID_IMAGE, cv_image_cropped if self.use_crop else cv_image
+                return True, VALID_IMAGE, to_base64(cv_image_cropped) if self.use_crop else to_base64(cv_image)
             else:
                 cv2.rectangle(cv_image, (x, y), (x + width, y + height), self.INCORRECT_COLOR, self.border_thickness)
-                return False, FAKE_DETECTED, cv_image
+                return False, FAKE_DETECTED, to_base64(cv_image)
 
         else:
             for (x, y, width, height) in faces:
                 cv2.rectangle(cv_image, (x, y), (x + width, y + height), self.INCORRECT_COLOR, self.border_thickness)
 
-            return False, MULTIPLE_FACES_DETECTED, cv_image
+            return False, MULTIPLE_FACES_DETECTED, to_base64(cv_image)

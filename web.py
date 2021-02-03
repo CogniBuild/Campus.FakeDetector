@@ -2,7 +2,7 @@ import numpy as np
 
 from flask import Flask, request, make_response
 from settings import *
-from kernel.detectors import FaceScanner
+from kernel import FaceScanner
 
 
 app = Flask(__name__)

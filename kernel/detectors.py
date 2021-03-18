@@ -1,14 +1,11 @@
-import cv2
-import base64
+import io
+import numpy as np
 import tensorflow as tf
+import face_recognition
 
+from PIL import Image
 from kernel.filters import *
 from kernel.messages import *
-
-
-def to_base64(image: np.array) -> bytes:
-    _, buffer_img = cv2.imencode('.png', image)
-    return base64.b64encode(buffer_img)
 
 
 class DeepFakeDetectorBase(object):
@@ -19,10 +16,12 @@ class DeepFakeDetectorBase(object):
         self.model.load_weights(kernel_path)
 
     def is_image_real(self, image: np.array) -> bool:
-        assert image.shape == self.resize_ratio
+        assert image.shape == (*self.resize_ratio, 3)
 
-        input_tensor = image.reshape(1, *self.resize_ratio)
+        input_tensor = image.reshape(1, *self.resize_ratio, 3)
         probability = float(self.model(input_tensor))
+
+        print(probability)
 
         return probability >= self.PROBABILITY_THRESHOLD
 
@@ -55,7 +54,7 @@ class DeepFakeDetectorGray(DeepFakeDetectorBase):
 class DeepFakeDetectorResNet(DeepFakeDetectorBase):
     def __init__(self, resize_ratio: tuple):
         self.resize_ratio = resize_ratio
-        input_layer = tf.keras.layers.Input(shape=resize_ratio)
+        input_layer = tf.keras.layers.Input(shape=(*resize_ratio, 3))
 
         b1_cnv2d_1 = tf.keras.layers.Conv2D(filters=16, kernel_size=(3, 3), strides=(2, 2), padding='same',
                                             use_bias=False, kernel_initializer='normal')(input_layer)
@@ -106,64 +105,32 @@ class DeepFakeDetectorResNet(DeepFakeDetectorBase):
 
 
 class FaceScanner(object):
-    # Red color
-    INCORRECT_COLOR = (0, 0, 255)
-
-    # Green color
-    CORRECT_COLOR = (0, 255, 0)
-
     def __init__(self, resize_ratio: tuple,
-                 scanner_kernel_path: str,
                  detector_kernel_path: str,
-                 use_gray_filter=False,
-                 use_crop=False, crop_offset=0,
-                 scale_factor=1.1, min_neighbors=5,
-                 min_size=(64, 64), border_thickness=3):
-        self.resize_ratio = resize_ratio
-        self.scanner = cv2.CascadeClassifier(scanner_kernel_path)
-        self.scale_factor, self.min_neighbors, self.min_size = scale_factor, min_neighbors, min_size
-        self.border_thickness, self.use_crop, self.crop_offset = border_thickness, use_crop, crop_offset
-        self.use_gray_filter = use_gray_filter
+                 use_gray_filter=False):
+        self.resize_ratio, self.use_gray_filter = resize_ratio, use_gray_filter
 
         self.detector = DeepFakeDetectorResNet(resize_ratio)
         self.detector.load_kernel(detector_kernel_path)
 
-    def validate_image(self, image: np.array) -> tuple:
-        cv_image = cv2.imdecode(image, cv2.IMREAD_UNCHANGED)
-        cv_image_grayscale = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
-        faces = self.scanner.detectMultiScale(cv_image_grayscale,
-                                              scaleFactor=self.scale_factor,
-                                              minNeighbors=self.min_neighbors,
-                                              minSize=self.min_size)
+    def validate_image(self, image: io.BytesIO) -> tuple:
+        image = face_recognition.load_image_file(image)
+        positions = face_recognition.face_locations(image, model='cnn')
 
-        if len(faces) == 0:
-            height, width, _ = cv_image.shape
-            cv2.rectangle(cv_image, (0, 0), (width, height), self.INCORRECT_COLOR, self.border_thickness)
+        if len(positions) == 0:
+            return False, NO_FACES_DETECTED
+        elif len(positions) == 1:
+            face_position = positions[0]
+            image_resized = np.array(Image.fromarray(image).crop(face_position).resize(self.resize_ratio))
 
-            return False, NO_FACES_DETECTED, to_base64(cv_image)
-        elif len(faces) == 1:
-            x, y, width, height = faces[0]
-
-            cv_image_cropped = cv_image[x - self.crop_offset:x + width + self.crop_offset,
-                                        y - self.crop_offset:y + height + self.crop_offset]
-
-            if self.use_crop:
-                cv_image_resized = cv2.resize(cv_image_cropped, (self.resize_ratio[0], self.resize_ratio[1]))
-            else:
-                cv_image_resized = cv2.resize(cv_image, (self.resize_ratio[0], self.resize_ratio[1]))
-
-            is_image_real = self.detector.is_image_real(rgb2gray(cv_image_resized)) \
+            is_image_real = self.detector.is_image_real(rgb2gray(image_resized)) \
                 if self.use_gray_filter \
-                else self.detector.is_image_real(cv_image_resized)
+                else self.detector.is_image_real(image_resized)
 
             if is_image_real:
-                return True, VALID_IMAGE, to_base64(cv_image_cropped) if self.use_crop else to_base64(cv_image)
+                return True, VALID_IMAGE
             else:
-                cv2.rectangle(cv_image, (x, y), (x + width, y + height), self.INCORRECT_COLOR, self.border_thickness)
-                return False, FAKE_DETECTED, to_base64(cv_image)
+                return False, FAKE_DETECTED
 
         else:
-            for (x, y, width, height) in faces:
-                cv2.rectangle(cv_image, (x, y), (x + width, y + height), self.INCORRECT_COLOR, self.border_thickness)
-
-            return False, MULTIPLE_FACES_DETECTED, to_base64(cv_image)
+            return False, MULTIPLE_FACES_DETECTED

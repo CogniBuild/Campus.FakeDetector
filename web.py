@@ -7,9 +7,7 @@ from kernel import FaceScanner
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = APPLICATION_SECRET
-face_scanner = FaceScanner(RESIZE_RATIO,
-                           SCANNER_KERNEL_FILE_PATH,
-                           DETECTOR_KERNEL_FILE_PATH)
+face_scanner = FaceScanner(RESIZE_RATIO, DETECTOR_KERNEL_FILE_PATH)
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 
@@ -32,8 +30,8 @@ def fake_photo_detection():
     else:
         file = request.files['photo']
         if is_extension_correct(file.filename):
-            is_valid, response, img = face_scanner.validate_image(np.frombuffer(file.read(), np.uint8))
-            return jsonify({"Message": response, "IsValid": is_valid, "Image": img.decode('utf-8')}), 200
+            is_valid, response = face_scanner.validate_image(file)
+            return jsonify({"Message": response, "IsValid": is_valid}), 200
         else:
             return jsonify({"Message": "Allowed file extensions are *.png, *.jpg, *.jpeg"}), 400
 

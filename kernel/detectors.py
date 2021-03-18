@@ -11,9 +11,23 @@ def to_base64(image: np.array) -> bytes:
     return base64.b64encode(buffer_img)
 
 
-class DeepFakeDetectorGray(object):
+class DeepFakeDetectorBase(object):
     PROBABILITY_THRESHOLD = 0.5
+    model, resize_ratio = None, None
 
+    def load_kernel(self, kernel_path: str):
+        self.model.load_weights(kernel_path)
+
+    def is_image_real(self, image: np.array) -> bool:
+        assert image.shape == self.resize_ratio
+
+        input_tensor = image.reshape(1, *self.resize_ratio)
+        probability = float(self.model(input_tensor))
+
+        return probability >= self.PROBABILITY_THRESHOLD
+
+
+class DeepFakeDetectorGray(DeepFakeDetectorBase):
     def __init__(self, resize_ratio: tuple):
         self.resize_ratio = resize_ratio
         self.model = tf.keras.Sequential()
@@ -37,16 +51,58 @@ class DeepFakeDetectorGray(object):
 
         self.model.compile()
 
-    def load_kernel(self, kernel_path: str):
-        self.model.load_weights(kernel_path)
 
-    def is_image_real(self, image: np.array) -> bool:
-        assert image.shape == self.resize_ratio
+class DeepFakeDetectorResNet(DeepFakeDetectorBase):
+    def __init__(self, resize_ratio: tuple):
+        self.resize_ratio = resize_ratio
+        input_layer = tf.keras.layers.Input(shape=resize_ratio)
 
-        input_tensor = image.reshape(1, *self.resize_ratio)
-        probability = float(self.model(input_tensor))
+        b1_cnv2d_1 = tf.keras.layers.Conv2D(filters=16, kernel_size=(3, 3), strides=(2, 2), padding='same',
+                                            use_bias=False, kernel_initializer='normal')(input_layer)
+        b1_relu_1 = tf.keras.layers.ReLU()(b1_cnv2d_1)
+        b1_bn_1 = tf.keras.layers.BatchNormalization(epsilon=1e-3, momentum=0.999)(b1_relu_1)
 
-        return probability >= self.PROBABILITY_THRESHOLD
+        b1_cnv2d_2 = tf.keras.layers.Conv2D(filters=32, kernel_size=(1, 1), strides=(2, 2), padding='same',
+                                            use_bias=False, kernel_initializer='normal')(b1_bn_1)
+        b1_relu_2 = tf.keras.layers.ReLU()(b1_cnv2d_2)
+        b1_out = tf.keras.layers.BatchNormalization(epsilon=1e-3, momentum=0.999)(b1_relu_2)
+
+        b2_cnv2d_1 = tf.keras.layers.Conv2D(filters=32, kernel_size=(1, 1), strides=(1, 1), padding='same',
+                                            use_bias=False, kernel_initializer='normal')(b1_out)
+        b2_relu_1 = tf.keras.layers.ReLU()(b2_cnv2d_1)
+        b2_bn_1 = tf.keras.layers.BatchNormalization(epsilon=1e-3, momentum=0.999)(b2_relu_1)
+
+        b2_add = tf.keras.layers.Add()([b1_out, b2_bn_1])
+
+        b2_cnv2d_2 = tf.keras.layers.Conv2D(filters=64, kernel_size=(3, 3), strides=(2, 2), padding='same',
+                                            use_bias=False, kernel_initializer='normal')(b2_add)
+        b2_relu_2 = tf.keras.layers.ReLU()(b2_cnv2d_2)
+        b2_out = tf.keras.layers.BatchNormalization(epsilon=1e-3, momentum=0.999)(b2_relu_2)
+
+        b3_cnv2d_1 = tf.keras.layers.Conv2D(filters=64, kernel_size=(1, 1), strides=(1, 1), padding='same',
+                                            use_bias=False, kernel_initializer='normal')(b2_out)
+        b3_relu_1 = tf.keras.layers.ReLU()(b3_cnv2d_1)
+        b3_bn_1 = tf.keras.layers.BatchNormalization(epsilon=1e-3, momentum=0.999)(b3_relu_1)
+
+        b3_add = tf.keras.layers.Add()([b2_out, b3_bn_1])
+
+        b3_cnv2d_2 = tf.keras.layers.Conv2D(filters=128, kernel_size=(3, 3), strides=(2, 2), padding='same',
+                                            use_bias=False, kernel_initializer='normal')(b3_add)
+        b3_relu_2 = tf.keras.layers.ReLU()(b3_cnv2d_2)
+        b3_out = tf.keras.layers.BatchNormalization(epsilon=1e-3, momentum=0.999)(b3_relu_2)
+
+        b4_avg_p = tf.keras.layers.GlobalAveragePooling2D()(b3_out)
+
+        inter_layer_1 = tf.keras.layers.Dense(16, activation='softmax',
+                                              kernel_initializer='he_uniform')(b4_avg_p)
+
+        inter_layer_2 = tf.keras.layers.Dense(16, activation='softmax',
+                                              kernel_initializer='he_uniform')(inter_layer_1)
+
+        output_layer = tf.keras.layers.Dense(1, activation='sigmoid')(inter_layer_2)
+
+        self.model = tf.keras.models.Model(input_layer, output_layer)
+        self.model.compile()
 
 
 class FaceScanner(object):
@@ -59,15 +115,17 @@ class FaceScanner(object):
     def __init__(self, resize_ratio: tuple,
                  scanner_kernel_path: str,
                  detector_kernel_path: str,
+                 use_gray_filter=False,
                  use_crop=False, crop_offset=0,
                  scale_factor=1.1, min_neighbors=5,
-                 min_size=(10, 10), border_thickness=3):
+                 min_size=(64, 64), border_thickness=3):
         self.resize_ratio = resize_ratio
         self.scanner = cv2.CascadeClassifier(scanner_kernel_path)
         self.scale_factor, self.min_neighbors, self.min_size = scale_factor, min_neighbors, min_size
         self.border_thickness, self.use_crop, self.crop_offset = border_thickness, use_crop, crop_offset
+        self.use_gray_filter = use_gray_filter
 
-        self.detector = DeepFakeDetectorGray(resize_ratio)
+        self.detector = DeepFakeDetectorResNet(resize_ratio)
         self.detector.load_kernel(detector_kernel_path)
 
     def validate_image(self, image: np.array) -> tuple:
@@ -90,11 +148,15 @@ class FaceScanner(object):
                                         y - self.crop_offset:y + height + self.crop_offset]
 
             if self.use_crop:
-                cv_image_resized = cv2.resize(cv_image_cropped, self.resize_ratio)
+                cv_image_resized = cv2.resize(cv_image_cropped, (self.resize_ratio[0], self.resize_ratio[1]))
             else:
-                cv_image_resized = cv2.resize(cv_image, self.resize_ratio)
+                cv_image_resized = cv2.resize(cv_image, (self.resize_ratio[0], self.resize_ratio[1]))
 
-            if self.detector.is_image_real(rgb2gray(cv_image_resized)):
+            is_image_real = self.detector.is_image_real(rgb2gray(cv_image_resized)) \
+                if self.use_gray_filter \
+                else self.detector.is_image_real(cv_image_resized)
+
+            if is_image_real:
                 return True, VALID_IMAGE, to_base64(cv_image_cropped) if self.use_crop else to_base64(cv_image)
             else:
                 cv2.rectangle(cv_image, (x, y), (x + width, y + height), self.INCORRECT_COLOR, self.border_thickness)

@@ -20,8 +20,6 @@ class DeepFakeDetectorBase(object):
         input_tensor = image.reshape(-1, *self.resize_ratio)
         probability = float(self.model(input_tensor))
 
-        print(probability)
-
         return probability >= self.PROBABILITY_THRESHOLD
 
 

@@ -23,72 +23,51 @@ class DeepFakeDetectorBase(object):
         return probability >= self.PROBABILITY_THRESHOLD
 
 
-class DeepFakeDetectorGray(DeepFakeDetectorBase):
+class DeepFakeDetectorResNet2D(DeepFakeDetectorBase):
     def __init__(self, resize_ratio: tuple):
         self.resize_ratio = resize_ratio
-        self.model = tf.keras.Sequential()
-        self.model.add(tf.keras.layers.Conv1D(32, 3, activation='relu', input_shape=resize_ratio))
-        self.model.add(tf.keras.layers.MaxPooling1D(2))
-        self.model.add(tf.keras.layers.BatchNormalization())
 
-        self.model.add(tf.keras.layers.Conv1D(64, 3, activation='relu'))
-        self.model.add(tf.keras.layers.MaxPooling1D(2))
-        self.model.add(tf.keras.layers.BatchNormalization())
+        input_layer = tf.keras.layers.Input(shape=self.resize_ratio)
 
-        self.model.add(tf.keras.layers.Conv1D(64, 3, activation='relu'))
-        self.model.add(tf.keras.layers.MaxPooling1D(2))
-        self.model.add(tf.keras.layers.BatchNormalization())
-
-        self.model.add(tf.keras.layers.Flatten())
-
-        self.model.add(tf.keras.layers.Dense(64, activation='relu'))
-        self.model.add(tf.keras.layers.Dense(64, activation='relu'))
-        self.model.add(tf.keras.layers.Dense(1))
-
-        self.model.compile()
-
-
-class DeepFakeDetectorResNet(DeepFakeDetectorBase):
-    def __init__(self, resize_ratio: tuple):
-        self.resize_ratio = resize_ratio
-        input_layer = tf.keras.layers.Input(shape=resize_ratio)
-        b1_cnv2d_1 = tf.keras.layers.Conv1D(filters=16, kernel_size=3, strides=2, padding='same',
+        b1_cnv2d_1 = tf.keras.layers.Conv2D(filters=16, kernel_size=(3, 3), strides=(2, 2), padding='same',
                                             use_bias=False, kernel_initializer='normal', activation='elu')(input_layer)
         b1_bn_1 = tf.keras.layers.BatchNormalization(epsilon=1e-3, momentum=0.999)(b1_cnv2d_1)
 
-        b1_cnv2d_2 = tf.keras.layers.Conv1D(filters=32, kernel_size=1, strides=2, padding='same',
+        b1_cnv2d_2 = tf.keras.layers.Conv2D(filters=32, kernel_size=(1, 1), strides=(2, 2), padding='same',
                                             use_bias=False, kernel_initializer='normal', activation='elu')(b1_bn_1)
         b1_out = tf.keras.layers.BatchNormalization(epsilon=1e-3, momentum=0.999)(b1_cnv2d_2)
 
-        b2_cnv2d_1 = tf.keras.layers.Conv1D(filters=32, kernel_size=1, strides=1, padding='same',
+        b2_cnv2d_1 = tf.keras.layers.Conv2D(filters=32, kernel_size=(1, 1), strides=(1, 1), padding='same',
                                             use_bias=False, kernel_initializer='normal', activation='elu')(b1_out)
         b2_bn_1 = tf.keras.layers.BatchNormalization(epsilon=1e-3, momentum=0.999)(b2_cnv2d_1)
 
         b2_add = tf.keras.layers.Add()([b1_out, b2_bn_1])
 
-        b2_cnv2d_2 = tf.keras.layers.Conv1D(filters=64, kernel_size=3, strides=2, padding='same',
+        b2_cnv2d_2 = tf.keras.layers.Conv2D(filters=64, kernel_size=(3, 3), strides=(2, 2), padding='same',
                                             use_bias=False, kernel_initializer='normal', activation='elu')(b2_add)
         b2_out = tf.keras.layers.BatchNormalization(epsilon=1e-3, momentum=0.999)(b2_cnv2d_2)
 
-        b3_cnv2d_1 = tf.keras.layers.Conv1D(filters=64, kernel_size=1, strides=1, padding='same',
+        b3_cnv2d_1 = tf.keras.layers.Conv2D(filters=64, kernel_size=(1, 1), strides=(1, 1), padding='same',
                                             use_bias=False, kernel_initializer='normal', activation='elu')(b2_out)
         b3_bn_1 = tf.keras.layers.BatchNormalization(epsilon=1e-3, momentum=0.999)(b3_cnv2d_1)
 
         b3_add = tf.keras.layers.Add()([b2_out, b3_bn_1])
 
-        b3_cnv2d_2 = tf.keras.layers.Conv1D(filters=128, kernel_size=3, strides=2, padding='same',
+        b3_cnv2d_2 = tf.keras.layers.Conv2D(filters=128, kernel_size=(3, 3), strides=(2, 2), padding='same',
                                             use_bias=False, kernel_initializer='normal', activation='elu')(b3_add)
         b3_out = tf.keras.layers.BatchNormalization(epsilon=1e-3, momentum=0.999)(b3_cnv2d_2)
 
-        b4_avg_p = tf.keras.layers.GlobalMaxPool1D()(b3_out)
+        b4_avg_p = tf.keras.layers.GlobalMaxPooling2D()(b3_out)
 
-        inter_layer_1 = tf.keras.layers.Dense(16, activation='elu',
+        inter_layer_1 = tf.keras.layers.Dense(512, activation='elu',
                                               kernel_initializer='he_uniform')(b4_avg_p)
+        dropout_layer_1 = tf.keras.layers.Dropout(0.2)(inter_layer_1)
 
-        inter_layer_2 = tf.keras.layers.Dense(16, activation='elu',
-                                              kernel_initializer='he_uniform')(inter_layer_1)
+        inter_layer_2 = tf.keras.layers.Dense(512, activation='elu',
+                                              kernel_initializer='he_uniform')(dropout_layer_1)
+        dropout_layer_2 = tf.keras.layers.Dropout(0.2)(inter_layer_2)
 
-        output_layer = tf.keras.layers.Dense(1, activation='sigmoid')(inter_layer_2)
+        output_layer = tf.keras.layers.Dense(1, activation='sigmoid')(dropout_layer_2)
 
         self.model = tf.keras.models.Model(input_layer, output_layer)
         self.model.compile()
@@ -97,28 +76,42 @@ class DeepFakeDetectorResNet(DeepFakeDetectorBase):
 class FaceScanner(object):
     def __init__(self, resize_ratio: tuple,
                  detector_kernel_path: str,
-                 use_gray_filter=True):
+                 use_gray_filter=False,
+                 use_crop=False,
+                 cropping_offset=50):
         self.resize_ratio, self.use_gray_filter = resize_ratio, use_gray_filter
+        self.cropping_offset, self.use_crop = cropping_offset, use_crop
 
-        self.detector = DeepFakeDetectorResNet(resize_ratio)
+        self.detector = DeepFakeDetectorResNet2D(resize_ratio)
         self.detector.load_kernel(detector_kernel_path)
 
     def validate_image(self, image: io.BytesIO) -> tuple:
         image_array = face_recognition.load_image_file(image)
-        positions = face_recognition.face_locations(image_array, model='cnn')
+        positions = face_recognition.face_locations(image_array, model='hog')
 
         if len(positions) == 0:
             return False, NO_FACES_DETECTED
         elif len(positions) == 1:
             face_position = positions[0]
-            left, upper, right, lower = face_position[3], face_position[0], face_position[1], face_position[2]
+            left, upper, right, lower = face_position[3] - self.cropping_offset, \
+                face_position[0] - self.cropping_offset, \
+                face_position[1] + self.cropping_offset, \
+                face_position[2] + self.cropping_offset
 
             image_resized = np.array(Image.fromarray(
-                image_array).crop((left, upper, right, lower)).resize(self.resize_ratio))
+                image_array).crop((left, upper, right, lower)).resize((self.resize_ratio[0], self.resize_ratio[1])))
 
-            is_image_real = self.detector.is_image_real(rgb2gray(image_resized / 255.0)) \
-                if self.use_gray_filter \
-                else self.detector.is_image_real(image_resized / 255.0)
+            if self.use_crop:
+                is_image_real = self.detector.is_image_real(rgb2gray(image_resized / 255.0)) \
+                    if self.use_gray_filter \
+                    else self.detector.is_image_real(image_resized / 255.0)
+            else:
+                image_array = np.array(Image.fromarray(
+                    image_array).resize((self.resize_ratio[0], self.resize_ratio[1])))
+
+                is_image_real = self.detector.is_image_real(rgb2gray(image_array / 255.0)) \
+                    if self.use_gray_filter \
+                    else self.detector.is_image_real(image_array / 255.0)
 
             if is_image_real:
                 return True, VALID_IMAGE

@@ -1,0 +1,4 @@
+azure-functions
+dlib-bin
+face-recognition
+tensorflow

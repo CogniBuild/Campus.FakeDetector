@@ -79,15 +79,12 @@ class DeepFakeDetectorResNet2D(DeepFakeDetectorBase):
 
 class FaceScanner(object):
     def __init__(self, resize_ratio: tuple, detector_kernel_path: str,
-                 use_gray_filter=False, use_crop=False, cropping_offset=0,
-                 probability_threshold=0.5):
+                 use_gray_filter=False, probability_threshold=0.5):
         self.resize_ratio, self.use_gray_filter = resize_ratio, use_gray_filter
-        self.cropping_offset, self.use_crop = cropping_offset, use_crop
-
         self.detector = DeepFakeDetectorResNet2D(resize_ratio, probability_threshold)
         self.detector.load_kernel(detector_kernel_path)
 
-    def validate_image(self, image: io.BytesIO) -> tuple:
+    def validate_image(self, image: io.BytesIO, use_crop=False, cropping_offset=0) -> tuple:
         image_array = face_recognition.load_image_file(image)
         positions = face_recognition.face_locations(image_array, model='hog')
 
@@ -99,15 +96,15 @@ class FaceScanner(object):
             }
         elif len(positions) == 1:
             face_position = positions[0]
-            left, upper, right, lower = face_position[3] - self.cropping_offset, \
-                face_position[0] - self.cropping_offset, \
-                face_position[1] + self.cropping_offset, \
-                face_position[2] + self.cropping_offset
+            left, upper, right, lower = face_position[3] - cropping_offset, \
+                face_position[0] - cropping_offset, \
+                face_position[1] + cropping_offset, \
+                face_position[2] + cropping_offset
 
             image_resized = np.array(Image.fromarray(
                 image_array).crop((left, upper, right, lower)).resize((self.resize_ratio[0], self.resize_ratio[1])))
 
-            if self.use_crop:
+            if use_crop:
                 is_image_real = self.detector.is_image_real(rgb2gray(image_resized / 255.0)) \
                     if self.use_gray_filter \
                     else self.detector.is_image_real(image_resized / 255.0)
@@ -140,4 +137,5 @@ class FaceScanner(object):
             }
 
 
-face_scanner = FaceScanner(RESIZE_RATIO, DETECTOR_KERNEL_FILE_PATH, PROBABILITY_THRESHOLD)
+face_scanner = FaceScanner(RESIZE_RATIO, DETECTOR_KERNEL_FILE_PATH,
+                           probability_threshold=PROBABILITY_THRESHOLD)

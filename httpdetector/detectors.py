@@ -4,11 +4,15 @@ import face_recognition
 
 from PIL import Image
 from .filters import *
+from .settings import *
 
 
 class DeepFakeDetectorBase(object):
     PROBABILITY_THRESHOLD = 0.5
     model, resize_ratio = None, None
+
+    def __init__(self, probability_threshold: float):
+        self.PROBABILITY_THRESHOLD = probability_threshold
 
     def load_kernel(self, kernel_path: str):
         self.model.load_weights(kernel_path)
@@ -23,7 +27,8 @@ class DeepFakeDetectorBase(object):
 
 
 class DeepFakeDetectorResNet2D(DeepFakeDetectorBase):
-    def __init__(self, resize_ratio: tuple):
+    def __init__(self, resize_ratio: tuple, probability_threshold: float):
+        super().__init__(probability_threshold)
         self.resize_ratio = resize_ratio
 
         input_layer = tf.keras.layers.Input(shape=self.resize_ratio)
@@ -74,19 +79,20 @@ class DeepFakeDetectorResNet2D(DeepFakeDetectorBase):
 
 class FaceScanner(object):
     def __init__(self, resize_ratio: tuple, detector_kernel_path: str,
-                 use_gray_filter=False, use_crop=False, cropping_offset=0):
+                 use_gray_filter=False, use_crop=False, cropping_offset=0,
+                 probability_threshold=0.5):
         self.resize_ratio, self.use_gray_filter = resize_ratio, use_gray_filter
         self.cropping_offset, self.use_crop = cropping_offset, use_crop
 
-        self.detector = DeepFakeDetectorResNet2D(resize_ratio)
+        self.detector = DeepFakeDetectorResNet2D(resize_ratio, probability_threshold)
         self.detector.load_kernel(detector_kernel_path)
 
-    def validate_image(self, image: io.BytesIO) -> dict:
+    def validate_image(self, image: io.BytesIO) -> tuple:
         image_array = face_recognition.load_image_file(image)
         positions = face_recognition.face_locations(image_array, model='hog')
 
         if len(positions) == 0:
-            return {
+            return "No faces detected on the photo", {
                 "no-faces": 1,
                 "multiple-faces": 0,
                 "deep-fake": 0
@@ -114,21 +120,24 @@ class FaceScanner(object):
                     else self.detector.is_image_real(image_array / 255.0)
 
             if is_image_real:
-                return {
+                return "Photo passed all preliminary checks", {
                     "no-faces": 0,
                     "multiple-faces": 0,
                     "deep-fake": 0
                 }
             else:
-                return {
+                return "Detected face on photo is fake", {
                     "no-faces": 0,
                     "multiple-faces": 0,
                     "deep-fake": 1
                 }
 
         else:
-            return {
+            return "Multiple faces detected on the photo", {
                 "no-faces": 0,
                 "multiple-faces": 1,
                 "deep-fake": 0
             }
+
+
+face_scanner = FaceScanner(RESIZE_RATIO, DETECTOR_KERNEL_FILE_PATH, PROBABILITY_THRESHOLD)

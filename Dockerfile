@@ -6,6 +6,8 @@ ENV AzureWebJobsScriptRoot=/home/site/wwwroot \
     AzureWebJobsDisableHomepage=true \
     AzureFunctionsJobHost__Logging__Console__IsEnabled=true
 ENV TF_CPP_MIN_LOG_LEVEL=3
+ENV DETECTOR_KERNEL_FILE_PATH='.kernels/weights.h5'
+ENV PROBABILITY_THRESHOLD=0.5
 
 RUN apt-get install build-essential cmake -y
 

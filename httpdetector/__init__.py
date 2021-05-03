@@ -2,6 +2,9 @@ import json
 import logging
 import azure.functions as func
 
+from .detectors import face_scanner
+
+
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg"}
 
 
@@ -50,7 +53,31 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             status_code=400
         )
 
-    return func.HttpResponse(
-        "Passed preliminary checks.",
-        status_code=200
-    )
+    response, status_codes = face_scanner.validate_image(image_file)
+
+    if 1 in status_codes.values():
+        return func.HttpResponse(
+            json.dumps({
+                "success": 0,
+                "message": response,
+                "checks": {
+                    "missing-photo": 0,
+                    "wrong-extension": 0,
+                    **status_codes
+                }
+            }),
+            status_code=400
+        )
+    else:
+        return func.HttpResponse(
+            json.dumps({
+                "success": 1,
+                "message": response,
+                "checks": {
+                    "missing-photo": 0,
+                    "wrong-extension": 0,
+                    **status_codes
+                }
+            }),
+            status_code=200
+        )

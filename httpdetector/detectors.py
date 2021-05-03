@@ -3,13 +3,16 @@ import tensorflow as tf
 import face_recognition
 
 from PIL import Image
-from kernel.filters import *
-from kernel.messages import *
+from .filters import *
+from .settings import *
 
 
 class DeepFakeDetectorBase(object):
     PROBABILITY_THRESHOLD = 0.5
     model, resize_ratio = None, None
+
+    def __init__(self, probability_threshold: float):
+        self.PROBABILITY_THRESHOLD = probability_threshold
 
     def load_kernel(self, kernel_path: str):
         self.model.load_weights(kernel_path)
@@ -24,7 +27,8 @@ class DeepFakeDetectorBase(object):
 
 
 class DeepFakeDetectorResNet2D(DeepFakeDetectorBase):
-    def __init__(self, resize_ratio: tuple):
+    def __init__(self, resize_ratio: tuple, probability_threshold: float):
+        super().__init__(probability_threshold)
         self.resize_ratio = resize_ratio
 
         input_layer = tf.keras.layers.Input(shape=self.resize_ratio)
@@ -74,34 +78,33 @@ class DeepFakeDetectorResNet2D(DeepFakeDetectorBase):
 
 
 class FaceScanner(object):
-    def __init__(self, resize_ratio: tuple,
-                 detector_kernel_path: str,
-                 use_gray_filter=False,
-                 use_crop=False,
-                 cropping_offset=50):
+    def __init__(self, resize_ratio: tuple, detector_kernel_path: str,
+                 use_gray_filter=False, probability_threshold=0.5):
         self.resize_ratio, self.use_gray_filter = resize_ratio, use_gray_filter
-        self.cropping_offset, self.use_crop = cropping_offset, use_crop
-
-        self.detector = DeepFakeDetectorResNet2D(resize_ratio)
+        self.detector = DeepFakeDetectorResNet2D(resize_ratio, probability_threshold)
         self.detector.load_kernel(detector_kernel_path)
 
-    def validate_image(self, image: io.BytesIO) -> tuple:
+    def validate_image(self, image: io.BytesIO, use_crop=False, cropping_offset=0) -> tuple:
         image_array = face_recognition.load_image_file(image)
         positions = face_recognition.face_locations(image_array, model='hog')
 
         if len(positions) == 0:
-            return False, NO_FACES_DETECTED
+            return "No faces detected on the photo", {
+                "no-faces": 1,
+                "multiple-faces": 0,
+                "deep-fake": 0
+            }
         elif len(positions) == 1:
             face_position = positions[0]
-            left, upper, right, lower = face_position[3] - self.cropping_offset, \
-                face_position[0] - self.cropping_offset, \
-                face_position[1] + self.cropping_offset, \
-                face_position[2] + self.cropping_offset
+            left, upper, right, lower = face_position[3] - cropping_offset, \
+                face_position[0] - cropping_offset, \
+                face_position[1] + cropping_offset, \
+                face_position[2] + cropping_offset
 
             image_resized = np.array(Image.fromarray(
                 image_array).crop((left, upper, right, lower)).resize((self.resize_ratio[0], self.resize_ratio[1])))
 
-            if self.use_crop:
+            if use_crop:
                 is_image_real = self.detector.is_image_real(rgb2gray(image_resized / 255.0)) \
                     if self.use_gray_filter \
                     else self.detector.is_image_real(image_resized / 255.0)
@@ -114,9 +117,25 @@ class FaceScanner(object):
                     else self.detector.is_image_real(image_array / 255.0)
 
             if is_image_real:
-                return True, VALID_IMAGE
+                return "Photo passed all preliminary checks", {
+                    "no-faces": 0,
+                    "multiple-faces": 0,
+                    "deep-fake": 0
+                }
             else:
-                return False, FAKE_DETECTED
+                return "Detected face on photo is fake", {
+                    "no-faces": 0,
+                    "multiple-faces": 0,
+                    "deep-fake": 1
+                }
 
         else:
-            return False, MULTIPLE_FACES_DETECTED
+            return "Multiple faces detected on the photo", {
+                "no-faces": 0,
+                "multiple-faces": 1,
+                "deep-fake": 0
+            }
+
+
+face_scanner = FaceScanner(RESIZE_RATIO, DETECTOR_KERNEL_FILE_PATH,
+                           probability_threshold=PROBABILITY_THRESHOLD)

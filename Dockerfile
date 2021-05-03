@@ -11,7 +11,7 @@ ENV ENV_PROBABILITY_THRESHOLD=0.5
 
 RUN apt-get install build-essential cmake -y
 
-COPY requirements-docker.txt /
-RUN pip install -r /requirements-docker.txt
+COPY requirements.txt /
+RUN pip install -r /requirements.txt
 
 COPY . /home/site/wwwroot

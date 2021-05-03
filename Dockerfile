@@ -7,6 +7,9 @@ ENV AzureWebJobsScriptRoot=/home/site/wwwroot \
     AzureFunctionsJobHost__Logging__Console__IsEnabled=true
 ENV TF_CPP_MIN_LOG_LEVEL=3
 
+RUN apt-get install cmake -y
+RUN pip install --upgrade pip setuptools
+
 COPY requirements.txt /
 RUN pip install -r /requirements.txt
 
